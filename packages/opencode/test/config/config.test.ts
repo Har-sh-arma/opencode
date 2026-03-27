@@ -20,7 +20,7 @@ import { pathToFileURL } from "url"
 import { Global } from "../../src/global"
 import { ProjectID } from "../../src/project/schema"
 import { Filesystem } from "../../src/util/filesystem"
-import { BunProc } from "../../src/bun"
+import { Npm } from "../../src/npm"
 
 const emptyAccount = Layer.mock(Account.Service)({
   active: () => Effect.succeed(Option.none()),
@@ -791,17 +791,12 @@ test("serializes concurrent config dependency installs", async () => {
   const seen: string[] = []
   let active = 0
   let max = 0
-  const run = spyOn(BunProc, "run").mockImplementation(async (_cmd, opts) => {
+  const run = spyOn(Npm, "install").mockImplementation(async (dir) => {
     active++
     max = Math.max(max, active)
-    seen.push(opts?.cwd ?? "")
+    seen.push(dir)
     await new Promise((resolve) => setTimeout(resolve, 25))
     active--
-    return {
-      code: 0,
-      stdout: Buffer.alloc(0),
-      stderr: Buffer.alloc(0),
-    }
   })
 
   try {
