@@ -857,7 +857,7 @@ export namespace SessionPrompt {
       })
     }
 
-    for (const [key, item] of Object.entries(await MCP.tools())) {
+    for (const [key, item] of Object.entries(await MCP.tools(context))) {
       const execute = item.execute
       if (!execute) continue
 

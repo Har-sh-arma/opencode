@@ -1,4 +1,5 @@
 import { dynamicTool, type Tool, jsonSchema, type JSONSchema7 } from "ai"
+import type { Tool as OpenCodeTool } from "../tool/tool"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
@@ -129,8 +130,10 @@ export namespace MCP {
 
   const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_")
 
+  type CtxBuilder = (args: unknown, opts: any) => OpenCodeTool.Context
+
   // Convert MCP tool definition to AI SDK Tool type
-  function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, timeout?: number): Tool {
+  function convertMcpTool(mcpTool: MCPToolDef, client: MCPClient, ctx: CtxBuilder, timeout?: number): Tool {
     const inputSchema = mcpTool.inputSchema
 
     // Spread first, then override type to ensure it's always "object"
@@ -144,11 +147,18 @@ export namespace MCP {
     return dynamicTool({
       description: mcpTool.description ?? "",
       inputSchema: jsonSchema(schema),
-      execute: async (args: unknown) => {
+      execute: async (args: unknown, opts) => {
+        const toolCtx = ctx(args, opts)
         return client.callTool(
           {
             name: mcpTool.name,
             arguments: (args || {}) as Record<string, unknown>,
+            _meta: {
+              sessionID: toolCtx.sessionID,
+              messageID: toolCtx.messageID,
+              callID: toolCtx.callID,
+              agent: toolCtx.agent,
+            },
           },
           CallToolResultSchema,
           {
@@ -215,7 +225,7 @@ export namespace MCP {
   export interface Interface {
     readonly status: () => Effect.Effect<Record<string, Status>>
     readonly clients: () => Effect.Effect<Record<string, MCPClient>>
-    readonly tools: () => Effect.Effect<Record<string, Tool>>
+    readonly tools: (ctx?: CtxBuilder) => Effect.Effect<Record<string, Tool>>
     readonly prompts: () => Effect.Effect<Record<string, PromptInfo & { client: string }>>
     readonly resources: () => Effect.Effect<Record<string, ResourceInfo & { client: string }>>
     readonly add: (name: string, mcp: Config.Mcp) => Effect.Effect<{ status: Record<string, Status> | Status }>
@@ -608,7 +618,7 @@ export namespace MCP {
         s.status[name] = { status: "disabled" }
       })
 
-      const tools = Effect.fn("MCP.tools")(function* () {
+      const tools = Effect.fn("MCP.tools")(function* (ctx?: CtxBuilder) {
         const result: Record<string, Tool> = {}
         const s = yield* InstanceState.get(cache)
 
@@ -635,7 +645,12 @@ export namespace MCP {
 
               const timeout = entry?.timeout ?? defaultTimeout
               for (const mcpTool of listed) {
-                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+                result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(
+                  mcpTool,
+                  client,
+                  ctx ?? (() => ({}) as any),
+                  timeout,
+                )
               }
             }),
           { concurrency: "unbounded" },
@@ -891,7 +906,7 @@ export namespace MCP {
 
   export const clients = async () => runPromise((svc) => svc.clients())
 
-  export const tools = async () => runPromise((svc) => svc.tools())
+  export const tools = async (ctx?: CtxBuilder) => runPromise((svc) => svc.tools(ctx ?? (() => ({}) as any)))
 
   export const prompts = async () => runPromise((svc) => svc.prompts())
 
